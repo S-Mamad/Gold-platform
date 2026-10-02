@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WalletType {
+  RIYAL
+  GOLD
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  BUY_GOLD
+  SELL_GOLD
+  DELIVER_GOLD
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  phoneNumber   String   @unique
+  /// Iranian national ID (کد ملی) — set after KYC
+  nationalCode  String?  @unique
+  /// Birth date as YYYY-MM-DD (for Shahkar / registry checks)
+  birthDate     String?
+  isKycVerified Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  wallets      Wallet[]
+  transactions Transaction[]
+}
+
+/// One RIYAL wallet + one GOLD wallet per user (enforced by @@unique)
+model Wallet {
+  id      String     @id @default(uuid()) @db.Uuid
+  userId  String     @db.Uuid
+  user    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type    WalletType
+  /// Money (Riyal) or gold weight (grams) — never Float
+  balance Decimal    @default(0) @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+model Transaction {
+  id              String            @id @default(uuid()) @db.Uuid
+  userId          String            @db.Uuid
+  user            User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  type            TransactionType
+  /// Debit/credit amount in Riyal or gold grams depending on type
+  amount          Decimal           @db.Decimal(18, 4)
+  /// Locked gold price (Riyal per gram) at freeze time; null for pure deposit/withdraw
+  pricePerGram    Decimal?          @db.Decimal(18, 4)
+  status          TransactionStatus @default(PENDING)
+  /// Prevents duplicate submissions from double-clicks / retries
+  idempotencyKey  String?           @unique
+  /// Extra details e.g. { iban } for withdrawals, admin rejection reason, etc.
+  metaData        Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
